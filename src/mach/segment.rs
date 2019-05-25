@@ -15,7 +15,7 @@ use goblin::mach::segment::{Section, Segment};
 use goblin::mach::relocation::RelocationInfo;
 
 use std::convert::TryFrom;
-use std::io::Cursor;
+use std::io::{Cursor, Seek, Write};
 
 use super::{
     CODE_SECTION_INDEX, DATA_SECTION_INDEX, CSTRING_SECTION_INDEX,
@@ -206,18 +206,21 @@ impl SegmentBuilder {
         }
     }
 
-    pub fn load_command<'a>(
+    pub fn write_load_commands<T: Write + Seek>(
         &self,
         ctx: Ctx,
-        section_offset: &mut u64,
-        relocation_offset: &mut u64,
-        raw_sections: &'a mut Cursor<Vec<u8>>,
-        relocations: &mut Vec<RelocationInfo>,
-    ) -> Result<(Segment<'a>, usize), Error> {
-        let first_section_offset = *section_offset;
+        mut file: T,
+        first_section_offset: u64,
+        relocation_offset_start: u64,
+    ) -> Result<SegmentBuildRes, Error> {
+        // marshall the sections into something we can actually write
+        let mut raw_sections = Cursor::new(Vec::<u8>::new());
+        let mut section_offset = first_section_offset;
+        let mut relocation_offset = relocation_offset_start;
+        let mut relocations = Vec::new();
 
         for section in self.sections.values() {
-            let header = section.create(section_offset, relocation_offset, relocations);
+            let header = section.create(&mut section_offset, &mut relocation_offset, &mut relocations);
             debug!("Section: {:#?}", header);
             raw_sections.iowrite_with(header, ctx)?;
         }
@@ -229,6 +232,24 @@ impl SegmentBuilder {
         segment_load_command.filesize = self.size();
         segment_load_command.vmsize = segment_load_command.filesize;
         segment_load_command.fileoff = first_section_offset;
-        Ok((segment_load_command, raw_sections.get_ref().len()))
+
+        debug!("Segment: {:#?}", segment_load_command);
+
+        let segment_load_command_cmdsize = u64::from(segment_load_command.cmdsize);
+
+        file.iowrite_with(segment_load_command, ctx)?;
+        file.write_all(&raw_sections.get_ref())?;
+
+        Ok(SegmentBuildRes {
+            relocations,
+            segment_load_command_cmdsize,
+            raw_sections_len: raw_sections.get_ref().len(),
+        })
     }
+}
+
+pub struct SegmentBuildRes {
+    pub relocations: Vec<RelocationInfo>,
+    pub segment_load_command_cmdsize: u64,
+    pub raw_sections_len: usize,
 }

@@ -155,52 +155,47 @@ impl<'a> Mach<'a> {
             debug!("SEEK: after header: {}", file.seek(Current(0))?);
         }
 
-        debug!("Symtable: {:#?}", self.symtab);
-        // marshall the sections into something we can actually write
-        let mut raw_sections = Cursor::new(Vec::<u8>::new());
-        let mut relocations = Vec::new();
-        let mut relocation_offset = relocation_offset_start;
-        let mut section_offset = first_section_offset;
+        let relocations = {
+            debug!("Symtable: {:#?}", self.symtab);
+            let segment::SegmentBuildRes {
+                relocations,
+                segment_load_command_cmdsize,
+                raw_sections_len,
+            } = self.segment.write_load_commands(
+                self.ctx,
+                &mut file,
+                first_section_offset,
+                relocation_offset_start,
+            )?;
 
-        let (segment_load_command, raw_sections_len) = self.segment.load_command(
-            self.ctx,
-            &mut section_offset,
-            &mut relocation_offset,
-            &mut raw_sections,
-            &mut relocations,
-        )?;
-        debug!("Segment: {:#?}", segment_load_command);
-
-        debug!(
-            "Raw sections len: {} - Section start: {} Strtable size: {} - Segment size: {}",
-            raw_sections_len,
-            first_section_offset,
-            self.symtab.sizeof_strtable(),
-            self.segment.size()
-        );
+            debug!(
+                "Raw sections len: {} - Section start: {} Strtable size: {} - Segment size: {}",
+                raw_sections_len,
+                first_section_offset,
+                self.symtab.sizeof_strtable(),
+                self.segment.size()
+            );
 
 
-        debug!("Symtable Offset: {:#?}", symtable_offset);
+            debug!("Symtable Offset: {:#?}", symtable_offset);
 
-        assert_eq!(
-            symtable_offset,
-            self.segment.offset
-                + segment_load_command.cmdsize as u64
-                + SIZEOF_SYMTAB_COMMAND as u64
-        );
-        let symtab_load_command = self.symtab.load_command(
-            u32::try_from(symtable_offset).unwrap(),
-            u32::try_from(strtable_offset).unwrap(),
-        );
-        debug!("Symtab Load command: {:#?}", symtab_load_command);
+            assert_eq!(
+                symtable_offset,
+                self.segment.offset
+                    + segment_load_command_cmdsize as u64
+                    + SIZEOF_SYMTAB_COMMAND as u64
+            );
+            self.symtab.write_load_command(
+                self.ctx,
+                &mut file,
+                u32::try_from(symtable_offset).unwrap(),
+                u32::try_from(strtable_offset).unwrap(),
+            )?;
 
-        //////////////////////////////
-        // write load commands
-        //////////////////////////////
-        file.iowrite_with(segment_load_command, self.ctx)?;
-        file.write_all(&raw_sections.into_inner())?;
-        file.iowrite_with(symtab_load_command, self.ctx.le)?;
-        debug!("SEEK: after load commands: {}", file.seek(Current(0))?);
+            debug!("SEEK: after load commands: {}", file.seek(Current(0))?);
+
+            relocations
+        };
 
         //////////////////////////////
         // write code

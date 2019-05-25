@@ -209,13 +209,21 @@ impl SymbolTable {
         }
     }
 
-    pub fn load_command(&self, symtable_offset: u32, strtable_offset: u32) -> SymtabCommand {
+    pub fn write_load_command<T: Write + Seek>(
+        &self,
+        ctx: Ctx,
+        mut file: T,
+        symtable_offset: u32,
+        strtable_offset: u32,
+    ) -> Result<(), Error> {
         let mut symtab_load_command = SymtabCommand::new();
         symtab_load_command.nsyms = self.len() as u32;
         symtab_load_command.symoff = symtable_offset;
         symtab_load_command.stroff = strtable_offset;
         symtab_load_command.strsize = self.sizeof_strtable() as u32;
-        symtab_load_command
+        debug!("Symtab Load command: {:#?}", symtab_load_command);
+        file.iowrite_with(symtab_load_command, ctx.le)?;
+        Ok(())
     }
 }
 
