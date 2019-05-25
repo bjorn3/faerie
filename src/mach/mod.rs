@@ -7,6 +7,7 @@ use crate::{Artifact, Ctx};
 use failure::Error;
 use scroll::ctx::SizeWith;
 use scroll::IOwrite;
+use std::convert::TryFrom;
 use std::io::SeekFrom::*;
 use std::io::{BufWriter, Cursor, Seek, Write};
 use string_interner::DefaultStringInterner;
@@ -14,9 +15,7 @@ use target_lexicon::Architecture;
 
 use goblin::mach::cputype;
 use goblin::mach::header::{Header, MH_OBJECT, MH_SUBSECTIONS_VIA_SYMBOLS};
-use goblin::mach::load_command::SymtabCommand;
-use goblin::mach::segment::Segment;
-use goblin::mach::symbols::Nlist;
+use goblin::mach::load_command::SIZEOF_SYMTAB_COMMAND;
 
 mod relocations;
 mod section;
@@ -134,26 +133,36 @@ impl<'a> Mach<'a> {
     }
     pub fn write<T: Write + Seek>(self, file: T) -> Result<(), Error> {
         let mut file = BufWriter::new(file);
-        // FIXME: this is ugly af, need cmdsize to get symtable offset
-        // construct symtab command
-        let mut symtab_load_command = SymtabCommand::new();
+
+        // sizes
         let segment_load_command_size = self.segment.load_command_size(&self.ctx);
-        let sizeof_load_commands = segment_load_command_size + symtab_load_command.cmdsize as u64;
+        let sizeof_load_commands = segment_load_command_size + SIZEOF_SYMTAB_COMMAND as u64;
+
+        // offsets
         let symtable_offset = self.segment.offset + sizeof_load_commands;
-        let strtable_offset =
-            symtable_offset + (self.symtab.len() as u64 * Nlist::size_with(&self.ctx) as u64);
+        let strtable_offset = symtable_offset + self.symtab.sizeof_symtable(self.ctx);
         let relocation_offset_start = strtable_offset + self.symtab.sizeof_strtable();
         let first_section_offset = Header::size_with(&self.ctx) as u64 + sizeof_load_commands;
-        // start with setting the headers dependent value
-        let header = self.header(sizeof_load_commands);
+
+        {
+            // start with setting the headers dependent value
+            let header = self.header(sizeof_load_commands);
+
+            //////////////////////////////
+            // write header
+            //////////////////////////////
+            file.iowrite_with(header, self.ctx)?;
+            debug!("SEEK: after header: {}", file.seek(Current(0))?);
+        }
 
         debug!("Symtable: {:#?}", self.symtab);
         // marshall the sections into something we can actually write
         let mut raw_sections = Cursor::new(Vec::<u8>::new());
+        let mut relocations = Vec::new();
         let mut relocation_offset = relocation_offset_start;
         let mut section_offset = first_section_offset;
         for section in self.segment.sections.values() {
-            let header = section.create(&mut section_offset, &mut relocation_offset);
+            let header = section.create(&mut section_offset, &mut relocation_offset, &mut relocations);
             debug!("Section: {:#?}", header);
             raw_sections.iowrite_with(header, self.ctx)?;
         }
@@ -166,35 +175,22 @@ impl<'a> Mach<'a> {
             self.segment.size()
         );
 
-        let mut segment_load_command = Segment::new(self.ctx, &raw_sections);
-        segment_load_command.nsects = self.segment.sections.len() as u32;
-        // FIXME: de-magic number these
-        segment_load_command.initprot = 7;
-        segment_load_command.maxprot = 7;
-        segment_load_command.filesize = self.segment.size();
-        segment_load_command.vmsize = segment_load_command.filesize;
-        segment_load_command.fileoff = first_section_offset;
+        let segment_load_command = self.segment.load_command(self.ctx, &raw_sections, first_section_offset);
         debug!("Segment: {:#?}", segment_load_command);
 
         debug!("Symtable Offset: {:#?}", symtable_offset);
+
         assert_eq!(
             symtable_offset,
             self.segment.offset
                 + segment_load_command.cmdsize as u64
-                + symtab_load_command.cmdsize as u64
+                + SIZEOF_SYMTAB_COMMAND as u64
         );
-        symtab_load_command.nsyms = self.symtab.len() as u32;
-        symtab_load_command.symoff = symtable_offset as u32;
-        symtab_load_command.stroff = strtable_offset as u32;
-        symtab_load_command.strsize = self.symtab.sizeof_strtable() as u32;
-
+        let symtab_load_command = self.symtab.load_command(
+            u32::try_from(symtable_offset).unwrap(),
+            u32::try_from(strtable_offset).unwrap(),
+        );
         debug!("Symtab Load command: {:#?}", symtab_load_command);
-
-        //////////////////////////////
-        // write header
-        //////////////////////////////
-        file.iowrite_with(header, self.ctx)?;
-        debug!("SEEK: after header: {}", file.seek(Current(0))?);
 
         //////////////////////////////
         // write load commands
@@ -241,12 +237,10 @@ impl<'a> Mach<'a> {
         //////////////////////////////
         // write relocations
         //////////////////////////////
-        for section in self.segment.sections.values() {
-            debug!("Relocations: {}", section.relocations().len());
-            for reloc in section.relocations().iter().cloned() {
-                debug!("  {:?}", reloc);
-                file.iowrite_with(reloc, self.ctx.le)?;
-            }
+        debug!("Relocations: {}", relocations.len());
+        for reloc in relocations {
+            debug!("  {:?}", reloc);
+            file.iowrite_with(reloc, self.ctx.le)?;
         }
         debug!("SEEK: after relocations: {}", file.seek(Current(0))?);
 

@@ -7,6 +7,7 @@ use std::io::SeekFrom::*;
 use std::io::{Seek, Write};
 
 use goblin::mach::symbols::Nlist;
+use goblin::mach::load_command::SymtabCommand;
 
 use super::{SectionIndex, StrTable, StrTableIndex, StrtableOffset};
 
@@ -148,6 +149,12 @@ impl SymbolTable {
     pub fn sizeof_strtable(&self) -> u64 {
         self.strtable_size
     }
+
+    pub fn sizeof_symtable(&self, ctx: Ctx) -> u64 {
+        use scroll::ctx::SizeWith;
+        self.len() as u64 * Nlist::size_with(&ctx) as u64
+    }
+
     /// Lookup this symbols offset in the segment
     pub fn offset(&self, symbol_name: &str) -> Option<u64> {
         self.strtable
@@ -200,6 +207,15 @@ impl SymbolTable {
             // NB do not move this, otherwise all offsets will be off
             self.strtable_size += name_len;
         }
+    }
+
+    pub fn load_command(&self, symtable_offset: u32, strtable_offset: u32) -> SymtabCommand {
+        let mut symtab_load_command = SymtabCommand::new();
+        symtab_load_command.nsyms = self.len() as u32;
+        symtab_load_command.symoff = symtable_offset;
+        symtab_load_command.stroff = strtable_offset;
+        symtab_load_command.strsize = self.sizeof_strtable() as u32;
+        symtab_load_command
     }
 }
 

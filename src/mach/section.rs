@@ -62,12 +62,13 @@ impl SectionBuilder {
         self.relocations.push(reloc)
     }
 
-    pub fn relocations(&self) -> &[RelocationInfo] {
-        &self.relocations
-    }
-
     /// Finalize and create the actual Mach-o section
-    pub fn create(&self, section_offset: &mut u64, relocation_offset: &mut u64) -> Section {
+    pub fn create(
+        &self,
+        section_offset: &mut u64,
+        relocation_offset: &mut u64,
+        relocations: &mut Vec<RelocationInfo>,
+    ) -> Section {
         let mut sectname = [0u8; 16];
         sectname.pwrite(&*self.sectname, 0).unwrap();
         let mut segname = [0u8; 16];
@@ -91,6 +92,7 @@ impl SectionBuilder {
             section.nreloc = nrelocs as _;
             section.reloff = *relocation_offset as u32;
             *relocation_offset += nrelocs as u64 * SIZEOF_RELOCATION_INFO as u64;
+            relocations.extend(&self.relocations);
         }
         section
     }

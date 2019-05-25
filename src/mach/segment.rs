@@ -10,10 +10,16 @@ use goblin::mach::constants::{
 use goblin::mach::header::{Header};
 use goblin::mach::segment::{Section, Segment};
 
+use std::convert::TryFrom;
+
 use super::{
     CODE_SECTION_INDEX, DATA_SECTION_INDEX, CSTRING_SECTION_INDEX,
     SectionBuilder, SectionIndex, SymbolTable, SymbolType,
 };
+
+const VM_PROT_READ: u32 = 0x1;
+const VM_PROT_WRITE: u32 = 0x2;
+const VM_PROT_EXECUTE: u32 = 0x4;
 
 #[derive(Debug)]
 /// A Mach-o program segment
@@ -193,5 +199,21 @@ impl SegmentBuilder {
             sections,
             offset,
         }
+    }
+
+    pub fn load_command<'a>(
+        &self,
+        ctx: Ctx,
+        raw_sections: &'a [u8],
+        first_section_offset: u64,
+    ) -> Segment<'a> {
+        let mut segment_load_command = Segment::new(ctx, raw_sections);
+        segment_load_command.nsects = u32::try_from(self.sections.len()).expect("More than u32::max_value() sections");
+        segment_load_command.initprot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE;
+        segment_load_command.maxprot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE;
+        segment_load_command.filesize = self.size();
+        segment_load_command.vmsize = segment_load_command.filesize;
+        segment_load_command.fileoff = first_section_offset;
+        segment_load_command
     }
 }
