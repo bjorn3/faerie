@@ -161,22 +161,24 @@ impl<'a> Mach<'a> {
         let mut relocations = Vec::new();
         let mut relocation_offset = relocation_offset_start;
         let mut section_offset = first_section_offset;
-        for section in self.segment.sections.values() {
-            let header = section.create(&mut section_offset, &mut relocation_offset, &mut relocations);
-            debug!("Section: {:#?}", header);
-            raw_sections.iowrite_with(header, self.ctx)?;
-        }
-        let raw_sections = raw_sections.into_inner();
+
+        let (segment_load_command, raw_sections_len) = self.segment.load_command(
+            self.ctx,
+            &mut section_offset,
+            &mut relocation_offset,
+            &mut raw_sections,
+            &mut relocations,
+        )?;
+        debug!("Segment: {:#?}", segment_load_command);
+
         debug!(
             "Raw sections len: {} - Section start: {} Strtable size: {} - Segment size: {}",
-            raw_sections.len(),
+            raw_sections_len,
             first_section_offset,
             self.symtab.sizeof_strtable(),
             self.segment.size()
         );
 
-        let segment_load_command = self.segment.load_command(self.ctx, &raw_sections, first_section_offset);
-        debug!("Segment: {:#?}", segment_load_command);
 
         debug!("Symtable Offset: {:#?}", symtable_offset);
 
@@ -196,7 +198,7 @@ impl<'a> Mach<'a> {
         // write load commands
         //////////////////////////////
         file.iowrite_with(segment_load_command, self.ctx)?;
-        file.write_all(&raw_sections)?;
+        file.write_all(&raw_sections.into_inner())?;
         file.iowrite_with(symtab_load_command, self.ctx.le)?;
         debug!("SEEK: after load commands: {}", file.seek(Current(0))?);
 
