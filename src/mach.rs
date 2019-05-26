@@ -456,6 +456,9 @@ impl SegmentBuilder {
     }
     fn build_custom_section(
         sections: &mut IndexMap<String, SectionBuilder>,
+        symtab: &mut SymbolTable,
+        symbol_offset: &mut u64,
+        section_idx: SectionIndex,
         offset: &mut u64,
         addr: &mut u64,
         def: &Definition,
@@ -492,6 +495,17 @@ impl SegmentBuilder {
         *offset += local_size;
         *addr += local_size;
         sections.insert(def.name.to_string(), section);
+
+        symtab.insert(
+            &format!("{}.sym", def.name),
+            SymbolType::Defined {
+                section: section_idx,
+                segment_relative_offset: 0,
+                absolute_offset: *symbol_offset,
+                global: true,
+            },
+        );
+        *symbol_offset += def.data.len() as u64;
     }
     /// Create a new program segment from an `artifact`, symbol table, and context
     // FIXME: this is pub(crate) for now because we can't leak pub(crate) Definition
@@ -547,8 +561,8 @@ impl SegmentBuilder {
             0,
             Some(S_CSTRING_LITERALS),
         );
-        for def in custom_sections {
-            Self::build_custom_section(&mut sections, &mut offset, &mut size, def);
+        for (i, def) in custom_sections.iter().enumerate() {
+            Self::build_custom_section(&mut sections, symtab, &mut symbol_offset, i + 3, &mut offset, &mut size, def);
         }
         for (ref import, _) in artifact.imports() {
             symtab.insert(import, SymbolType::Undefined);
