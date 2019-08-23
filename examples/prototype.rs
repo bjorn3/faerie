@@ -89,6 +89,8 @@ fn run (args: Args) -> Result<(), Error> {
         ("STATIC_REF", Decl::data().global().writable().into()),
         ("printf", Decl::function_import().into()),
         ("TLS", Decl::data().global().writable().tls().into()),
+        ("get_tls", Decl::function().global().into()),
+        ("__tls_get_addr", Decl::function_import().into()),
     ];
     obj.declarations(declarations.into_iter())?;
 
@@ -165,6 +167,15 @@ fn run (args: Args) -> Result<(), Error> {
 
     obj.define("TLS", vec![0xde, 0xad, 0xbe, 0xef])?;
 
+    obj.define("get_tls", vec![
+        0x50,                                     // push %rax
+        0x48, 0x8d, 0x3d, 0x00, 0x00, 0x00, 0x00, // lea 0x0(%rip), %rdi
+        0xe8, 0x00, 0x00, 0x00, 0x00,             // callq d
+        0x48, 0x8d, 0x80, 0x00, 0x00, 0x00, 0x00, // lea 0x0(%rax), %rax
+        0x59,                                     // pop %rcx
+        0xc3,                                     // retq
+    ])?;
+
     // Next, we declare our relocations,
     // which are _always_ relative to the `from` symbol
     // -- main relocations --
@@ -179,6 +190,10 @@ fn run (args: Args) -> Result<(), Error> {
     // -- static data relocations --
     // this is a reference to an object in the data section, so we are always at relative offset 0
     obj.link(Link { from: "STATIC_REF", to: "STATIC", at: 0 })?;
+
+    obj.link(Link { from: "get_tls", to: "TLS", at: 0x04 })?;
+    obj.link(Link { from: "get_tls", to: "__tls_get_addr", at: 0x09 })?;
+    obj.link(Link { from: "get_tls", to: "TLS", at: 0x10 })?;
 
     // Finally, we emit the object file
     obj.write(file)?;
