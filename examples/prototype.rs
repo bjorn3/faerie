@@ -88,6 +88,7 @@ fn run (args: Args) -> Result<(), Error> {
         ("STATIC", Decl::data().global().writable().into()),
         ("STATIC_REF", Decl::data().global().writable().into()),
         ("printf", Decl::function_import().into()),
+        ("TLS", Decl::data().global().writable().tls().into()),
     ];
     obj.declarations(declarations.into_iter())?;
 
@@ -161,6 +162,8 @@ fn run (args: Args) -> Result<(), Error> {
     // define a custom section
     obj.declare(".faerie", Decl::section(SectionKind::Data))?;
     obj.define(".faerie", b"some data".to_vec())?;
+
+    obj.define("TLS", vec![0xde, 0xad, 0xbe, 0xef])?;
 
     // Next, we declare our relocations,
     // which are _always_ relative to the `from` symbol

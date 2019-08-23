@@ -471,6 +471,11 @@ impl DataDecl {
         self
     }
 
+    /// Set tls
+    pub fn tls(self) -> Self {
+        self.with_tls(true)
+    }
+
     /// Setter for tls
     pub fn set_tls(&mut self, tls: bool) {
         self.tls = tls;
