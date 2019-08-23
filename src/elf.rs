@@ -200,6 +200,7 @@ struct SectionBuilder {
     exec: bool,
     write: bool,
     alloc: bool,
+    tls: bool,
     size: u64,
     name_offset: usize,
     align: Option<usize>,
@@ -213,6 +214,7 @@ impl SectionBuilder {
             exec: false,
             write: false,
             alloc: false,
+            tls: false,
             name_offset: 0,
             size,
             align: None,
@@ -231,6 +233,11 @@ impl SectionBuilder {
     /// Make this section writable
     pub fn writable(mut self, writable: bool) -> Self {
         self.write = writable;
+        self
+    }
+    /// Make this section storage for the initial value of tls data
+    pub fn tls(mut self, tls: bool) -> Self {
+        self.tls = tls;
         self
     }
     /// Specify section alignment
@@ -313,6 +320,11 @@ impl SectionBuilder {
             }
             SectionType::None => shdr.sh_type = SHT_NULL,
         }
+
+        if self.tls {
+            shdr.sh_flags |= SHF_TLS as u64;
+        }
+
         shdr
     }
 }
@@ -484,7 +496,13 @@ impl<'a> Elf<'a> {
             DefinedDecl::Function(_) => format!(".text.{}", name),
             DefinedDecl::Data(d) => format!(
                 ".{}.{}",
-                if d.is_writable() { "data" } else { "rodata" },
+                if d.is_tls() {
+                    "tdata"
+                } else if d.is_writable() {
+                    "data"
+                } else {
+                    "rodata"
+                },
                 name
             ),
             DefinedDecl::Section(_) => name.to_owned(),
@@ -505,6 +523,7 @@ impl<'a> Elf<'a> {
                 .alloc()
                 .writable(d.is_writable())
                 .exec(false)
+                .tls(d.is_tls())
                 .align(d.get_align()),
             DefinedDecl::Section(d) => SectionBuilder::new(def_size as u64)
                 .section_type(

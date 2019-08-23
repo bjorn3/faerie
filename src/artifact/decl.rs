@@ -420,6 +420,8 @@ pub struct DataDecl {
     writable: bool,
     datatype: DataType,
     align: Option<usize>,
+    // FIXME merge tls and writable fields
+    tls: bool,
 }
 
 impl Default for DataDecl {
@@ -430,6 +432,7 @@ impl Default for DataDecl {
             writable: false,
             datatype: DataType::Bytes,
             align: None,
+            tls: false,
         }
     }
 }
@@ -460,6 +463,22 @@ impl DataDecl {
     /// Accessor for mutability
     pub fn is_writable(&self) -> bool {
         self.writable
+    }
+
+    /// Builder for tls
+    pub fn with_tls(mut self, tls: bool) -> Self {
+        self.tls = tls;
+        self
+    }
+
+    /// Setter for tls
+    pub fn set_tls(&mut self, tls: bool) {
+        self.tls = tls;
+    }
+
+    /// Accessor for tls
+    pub fn is_tls(&self) -> bool {
+        self.tls
     }
 }
 
